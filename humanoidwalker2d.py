@@ -207,7 +207,7 @@ while not early_stop:
             tst_rewards = []
             distance_travelleds = []
             for i in range(10):
-                reward, distance_travelled = test_env(vis=True)
+                reward, distance_travelled = test_env(vis=False)
                 tst_rewards.append(reward)
                 distance_travelleds.append(distance_travelled)
             test_reward = np.mean(tst_rewards)
