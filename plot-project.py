@@ -1,3 +1,5 @@
+# This code is heavily influenced by user Josh Albert's response on this stackoverflow question: https://stackoverflow.com/questions/27427618/how-can-i-simply-calculate-the-rolling-moving-variance-of-a-time-series-in-pytho/47878011
+
 import numpy as np 
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
