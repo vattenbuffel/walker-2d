@@ -91,10 +91,12 @@ def compute_gae(next_value, rewards, masks, values, gamma=0.99, tau=0.95):
         returns.insert(0, gae + values[step])
     return returns
 
+def calculate_advantage(rewards, future_state_values, cur_state_values, gamma, terminal_state):
+    pass
 
 """
 # Calculate the generalized advantage estimation
-def calculate_gae(tau, gamma, time_horizon, terminal_state, state_values, next_state_values, rewards):
+def calculate_gae(tau, time_horizon, gamma, advantages):
     gaes = []
     prev_gae = []
 
