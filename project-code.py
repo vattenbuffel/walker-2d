@@ -25,12 +25,12 @@ device   = torch.device("cpu")
 env_name = "Pendulum-v0"
 env = gym.make(env_name)
 
-"""
+
 def init_weights(m):
     if isinstance(m, nn.Linear):
         nn.init.normal_(m.weight, mean=0., std=0.1)
         nn.init.constant_(m.bias, 0.1)
-"""     
+     
 
 class ActorCritic(nn.Module):
     def __init__(self, num_inputs, num_outputs, hidden_size, std=0.0):
@@ -46,11 +46,11 @@ class ActorCritic(nn.Module):
             nn.Linear(num_inputs, hidden_size),
             nn.ReLU(),
             nn.Linear(hidden_size, num_outputs),
-            nn.Tanh(),
+            #nn.Tanh(),
         )
         self.log_std = nn.Parameter(torch.ones(1, num_outputs) * std)
         
-#        self.apply(init_weights)
+        self.apply(init_weights)
         
     def forward(self, x):
         value = self.critic(x)
@@ -63,7 +63,7 @@ class ActorCritic(nn.Module):
 # Rename this fuck to evaluate agent
 def test_env(vis):
     test_env_ = gym.make(env_name)
-    if vis: test_env_.render()
+    #if vis: test_env_.render()
     state = test_env_.reset()
     done = False
     total_reward = 0
@@ -73,11 +73,10 @@ def test_env(vis):
         next_state, reward, done, _ = test_env_.step(dist.sample().cpu().numpy()[0])
         state = next_state
         total_reward += reward
-        if vis: time.sleep(1/60)
-        # if vis: env.render()
-
+        if vis: time.sleep(1/120)
+        if vis: test_env_.render()
+    
     #final_location_x = env.robot.get_location()[0]
-
     test_env_.close()
     #return total_reward, final_location_x
     return total_reward
@@ -92,7 +91,7 @@ def compute_gae(next_value, rewards, masks, values, gamma=0.99, tau=0.95):
         returns.insert(0, gae + values[step])
     return returns
 
-def calculate_advantage(rewards, future_state_values, cur_state_values, gamma, terminal_state):
+def calculate_advantage(rewards, state_values, gamma, terminal_state):
     pass
 
 """
@@ -114,8 +113,6 @@ def ppo_iter(mini_batch_size, states, actions, log_probs, returns, advantage):
         rand_ids = np.random.randint(0, batch_size, mini_batch_size)
         yield states[rand_ids, :], actions[rand_ids, :], log_probs[rand_ids, :], returns[rand_ids, :], advantage[rand_ids, :]
         
-        
-
 def ppo_update(ppo_epochs, mini_batch_size, states, actions, log_probs, returns, advantages, clip_param=0.2):
     for _ in range(ppo_epochs):
         for state, action, old_log_probs, return_, advantage in ppo_iter(mini_batch_size, states, actions, log_probs, returns, advantages):
@@ -143,7 +140,7 @@ num_outputs = env.action_space.shape[0]
 hidden_size      = 256
 lr               = 3e-4
 num_steps        = 20*16
-mini_batch_size  = 5
+mini_batch_size  = 20*16
 ppo_epochs       = 4
 threshold_reward = 100000
 load_best_model   = False
@@ -154,7 +151,7 @@ if load_best_model:
     model.load_state_dict(torch.load('most_recent_model'))
 
 
-max_frames = 1500000
+max_frames = 1000000
 frame_idx  = 0
 best_model_score = -10**10
 
@@ -199,11 +196,12 @@ while not early_stop:
         
         log_probs.append(log_prob)
         values.append(value)
-        try:
-            reward = reward[0]
-        except e:
-            pass
-        rewards.append(torch.FloatTensor([reward]).unsqueeze(1).to(device))
+        # try:
+        #     reward = reward[0]
+        # except e:
+        #     pass
+        #rewards.append(torch.FloatTensor([reward]).unsqueeze(1).to(device))
+        rewards.append(torch.FloatTensor(reward).unsqueeze(1).to(device))
         masks.append(torch.FloatTensor([1 - done]).unsqueeze(1).to(device))
         
         states.append(state)
@@ -213,32 +211,38 @@ while not early_stop:
         frame_idx += 1
         
         if frame_idx % 1000 == 0:
-            tst_rewards = []
-            #distance_travelleds = []
-            for i in range(10):
-                #reward, distance_travelled = test_env(vis=False)
-                reward = test_env(False)
-                tst_rewards.append(reward)
-                #distance_travelleds.append(distance_travelled)
-            test_reward = np.mean(tst_rewards)
-            #distance_travelled = np.mean(distance_travelleds)
-
+            test_reward = np.mean([test_env(False) for _ in range(10)])
             test_rewards.append(test_reward)
-            #test_distances.append(distance_travelled)
-
-            #print("score:", test_reward, "distance travelled:", distance_travelled)
-            print("score:", test_reward)
-            if test_reward > best_model_score: 
-                best_model_score = test_reward
-                torch.save(model.state_dict(), "best_model")
-                with open('test_rewards.npy', 'wb') as f:
-                    np.save(f, test_rewards)
-                #with open('distance_travelled.npy', 'wb') as f:
-                #    np.save(f, test_distances)
-
-            torch.save(model.state_dict(), "most_recent_model")
-
             if test_reward > threshold_reward: early_stop = True
+            print(test_reward)
+
+        # if frame_idx % 1000 == 0:
+        #     tst_rewards = []
+        #     #distance_travelleds = []
+        #     for i in range(10):
+        #         #reward, distance_travelled = test_env(vis=False)
+        #         reward = test_env(False)
+        #         tst_rewards.append(reward)
+        #         #distance_travelleds.append(distance_travelled)
+        #     test_reward = np.mean(tst_rewards)
+        #     #distance_travelled = np.mean(distance_travelleds)
+
+        #     test_rewards.append(test_reward)
+        #     #test_distances.append(distance_travelled)
+
+        #     #print("score:", test_reward, "distance travelled:", distance_travelled)
+        #     print("score:", test_reward)
+        #     if test_reward > best_model_score: 
+        #         best_model_score = test_reward
+        #         torch.save(model.state_dict(), "best_model")
+        #         with open('test_rewards.npy', 'wb') as f:
+        #             np.save(f, test_rewards)
+        #         #with open('distance_travelled.npy', 'wb') as f:
+        #         #    np.save(f, test_distances)
+
+        #     torch.save(model.state_dict(), "most_recent_model")
+
+        #     if test_reward > threshold_reward: early_stop = True
             
 
     # Calculate the value of the next state
