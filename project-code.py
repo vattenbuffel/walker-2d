@@ -71,7 +71,7 @@ def test_env(vis):
         next_state, reward, done, _ = test_env_.step(dist.sample().cpu().numpy()[0])
         state = next_state
         total_reward += reward
-        time.sleep(1/60)
+        if vis: time.sleep(1/60)
         # if vis: env.render()
 
     #final_location_x = env.robot.get_location()[0]
@@ -200,12 +200,12 @@ while not early_stop:
         state = next_state
         frame_idx += 1
         
-        if frame_idx % 1 == 0:
+        if frame_idx % 1000 == 0:
             tst_rewards = []
             #distance_travelleds = []
             for i in range(10):
                 #reward, distance_travelled = test_env(vis=False)
-                reward = test_env(vis=True)
+                reward = test_env(False)
                 tst_rewards.append(reward)
                 #distance_travelleds.append(distance_travelled)
             test_reward = np.mean(tst_rewards)
@@ -229,7 +229,7 @@ while not early_stop:
             if test_reward > threshold_reward: early_stop = True
             
 
-    next_state = torch.FloatTensor(next_state).to(device)
+    next_state = torch.FloatTensor(next_state).reshape(1,-1).to(device)
     _, next_value = model(next_state)
     returns = compute_gae(next_value, rewards, masks, values)
 
