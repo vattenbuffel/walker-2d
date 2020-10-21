@@ -21,7 +21,8 @@ import matplotlib.pyplot as plt
 device   = torch.device("cpu")
 
 #env = gym.make("Walker2DPyBulletEnv-v0")
-env = gym.make("InvertedPendulumPyBulletEnv-v0")
+env_name = "InvertedPendulumPyBulletEnv-v0"
+env = gym.make(env_name)
 
 """
 def init_weights(m):
@@ -60,7 +61,7 @@ class ActorCritic(nn.Module):
     
 # Rename this fuck to evaluate agent
 def test_env(vis):
-    test_env_ = gym.make("InvertedPendulumPyBulletEnv-v0")
+    test_env_ = gym.make(env_name)
     if vis: test_env_.render()
     state = test_env_.reset()
     done = False
@@ -169,7 +170,6 @@ state = env.reset()
 early_stop = False
 
 while not early_stop:
-
     log_probs = []
     values    = []
     states    = []
@@ -177,14 +177,19 @@ while not early_stop:
     rewards   = []
     masks     = []
     entropy = 0
+    done = False
 
     for _ in range(num_steps):
+        if done:
+            env.reset()
+
         state = state.reshape(1, -1)
         state = torch.FloatTensor(state).to(device)
         dist, value = model(state)
 
         action = dist.sample()
         next_state, reward, done, _ = env.step(action.cpu().numpy())
+        next_state = state.reshape(1, -1)
 
         log_prob = dist.log_prob(action)
         entropy += dist.entropy().mean()
@@ -192,7 +197,8 @@ while not early_stop:
         log_probs.append(log_prob)
         values.append(value)
         rewards.append(torch.FloatTensor([reward]).unsqueeze(1).to(device))
-        masks.append(torch.FloatTensor(1 - done).unsqueeze(1).to(device))
+        masks.append(torch.FloatTensor([1 - done]).unsqueeze(1).to(device))
+        #masks.append(torch.FloatTensor([1 - done]).to(device))
         
         states.append(state)
         actions.append(action)
@@ -229,7 +235,9 @@ while not early_stop:
             if test_reward > threshold_reward: early_stop = True
             
 
-    next_state = torch.FloatTensor(next_state).reshape(1,-1).to(device)
+    # Calculate the value of the next state
+    #next_state = torch.FloatTensor(next_state).reshape(1,-1).to(device)
+    next_state = torch.FloatTensor(next_state).to(device)
     _, next_value = model(next_state)
     returns = compute_gae(next_value, rewards, masks, values)
 
