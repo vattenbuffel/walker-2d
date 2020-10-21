@@ -21,7 +21,8 @@ import matplotlib.pyplot as plt
 device   = torch.device("cpu")
 
 #env = gym.make("Walker2DPyBulletEnv-v0")
-env_name = "InvertedPendulumPyBulletEnv-v0"
+#env_name = "InvertedPendulumPyBulletEnv-v0"
+env_name = "Pendulum-v0"
 env = gym.make(env_name)
 
 """
@@ -140,10 +141,10 @@ num_outputs = env.action_space.shape[0]
 
 #Hyper params:
 hidden_size      = 256
-lr               = 1e-4
-num_steps        = 256
-mini_batch_size  = 64
-ppo_epochs       = 10
+lr               = 3e-4
+num_steps        = 20*16
+mini_batch_size  = 5
+ppo_epochs       = 4
 threshold_reward = 100000
 load_best_model   = False
 
@@ -170,6 +171,7 @@ else:
 
 state = env.reset()
 early_stop = False
+done = False
 
 while not early_stop:
     log_probs = []
@@ -179,7 +181,6 @@ while not early_stop:
     rewards   = []
     masks     = []
     entropy = 0
-    done = False
 
     for _ in range(num_steps):
         if done:
@@ -198,9 +199,12 @@ while not early_stop:
         
         log_probs.append(log_prob)
         values.append(value)
+        try:
+            reward = reward[0]
+        except e:
+            pass
         rewards.append(torch.FloatTensor([reward]).unsqueeze(1).to(device))
         masks.append(torch.FloatTensor([1 - done]).unsqueeze(1).to(device))
-        #masks.append(torch.FloatTensor([1 - done]).to(device))
         
         states.append(state)
         actions.append(action)
@@ -238,7 +242,6 @@ while not early_stop:
             
 
     # Calculate the value of the next state
-    #next_state = torch.FloatTensor(next_state).reshape(1,-1).to(device)
     next_state = torch.FloatTensor(next_state).to(device)
     _, next_value = model(next_state)
     returns = compute_gae(next_value, rewards, masks, values)
