@@ -92,7 +92,15 @@ def compute_gae(next_value, rewards, masks, values, gamma=0.99, tau=0.95):
     return returns
 
 def calculate_advantage(rewards, state_values, gamma, terminal_state):
-    pass
+    # Convert the lists into torch tensors
+    prev_values = torch.cat(values[1:])
+    next_values = torch.cat(values[0:-1])
+    terminal_state = torch.cat(terminal_state)
+    rewards = torch.cat(rewards)
+    
+    # Calculate the advantages
+    advantage = rewards + gamma*next_values*terminal_state - prev_values
+    return advantage
 
 """
 # Calculate the generalized advantage estimation
@@ -248,9 +256,11 @@ while not early_stop:
     # Calculate the value of the next state
     next_state = torch.FloatTensor(next_state).to(device)
     _, next_value = model(next_state)
+    #advantages = calculate_advantage(rewards, values+[next_value], 0.99, masks)
     returns = compute_gae(next_value, rewards, masks, values)
 
     returns   = torch.cat(returns).detach()
+
     log_probs = torch.cat(log_probs).detach()
     values    = torch.cat(values).detach()
     states    = torch.cat(states)
