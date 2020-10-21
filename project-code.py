@@ -58,22 +58,25 @@ class ActorCritic(nn.Module):
         return dist, value
 
     
+# Rename this fuck to evaluate agent
 def test_env(vis):
-    if vis: env.render()
-    state = env.reset()
+    test_env_ = gym.make("InvertedPendulumPyBulletEnv-v0")
+    if vis: test_env_.render()
+    state = test_env_.reset()
     done = False
     total_reward = 0
     while not done:
         state = torch.FloatTensor(state).unsqueeze(0).to(device)
         dist, _ = model(state)
-        next_state, reward, done, _ = env.step(dist.sample().cpu().numpy()[0])
+        next_state, reward, done, _ = test_env_.step(dist.sample().cpu().numpy()[0])
         state = next_state
         total_reward += reward
-        #time.sleep(1/60)
-        if vis: env.render()
+        time.sleep(1/60)
+        # if vis: env.render()
 
     #final_location_x = env.robot.get_location()[0]
 
+    test_env_.close()
     #return total_reward, final_location_x
     return total_reward
 
