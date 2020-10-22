@@ -23,9 +23,7 @@ device   = torch.device("cuda" if use_cuda else "cpu")
 from multiprocessing_env import SubprocVecEnv
 
 num_envs = 16
-#env_name = "Pendulum-v0"
 env_name = "Walker2DPyBulletEnv-v0"
-# env_name = "InvertedPendulumPyBulletEnv-v0"
 
 def make_env():
     def _thunk():
@@ -155,7 +153,7 @@ def calculate_advantage(rewards, state_values, gamma, terminal_state):
 
 
 # Calculate the generalized advantage estimation
-def calculate_gae(lambda_, num_steps, gamma, advantages, terminal_states):#, state_values):
+def calculate_gae(lambda_, num_steps, gamma, advantages, terminal_states):
     # lambda: float
     # num_steps: int, how many steps to calculate gae for
     # gamma: float
@@ -171,7 +169,6 @@ def calculate_gae(lambda_, num_steps, gamma, advantages, terminal_states):#, sta
     # Start with the last sample and move backwards 
     for i in range(num_steps-1, -1, -1):
         gae = advantages[i] + gamma*lambda_*terminal_states[i]*prev_gae
-        #gaes.insert(0, gae)
         gaes.append(gae)
         prev_gae = gae
         
@@ -195,7 +192,7 @@ time_steps_to_train_for = 10**6
 evaluate_every = 10**3
 test_rewards = []
 best_model_score = -10**10
-eval_visable = False
+eval_visable = True
 eval_n_iterations = 10
 
 load_best_model   = False
@@ -279,7 +276,7 @@ for time_step in range(time_steps_to_train_for//num_envs//num_steps):
     _, next_value = model(next_state)
     state_values = values + [next_value]
     advantages = calculate_advantage(rewards, state_values, discount_factor, terminal_states)
-    gaes = calculate_gae(lambda_, num_steps, discount_factor, advantages, terminal_states)#, state_values)
+    gaes = calculate_gae(lambda_, num_steps, discount_factor, advantages, terminal_states)
     
     
     log_probs = torch.cat(log_probs).detach()
