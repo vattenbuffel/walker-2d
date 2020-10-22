@@ -108,6 +108,9 @@ def ppo_update(ppo_epochs, mini_batch_size, states, actions, log_probs, returns,
 
 # This evaluates the agent
 def evaluate_agent(vis, n_iterations):
+    # vis: boolean, if the evaluation should be rendered
+    # n_iterations: Integer, how many times the agent should be tested on the enviroment
+
     if vis: env.render()
     rewards = []
     distance_travelled = []
@@ -132,10 +135,14 @@ def evaluate_agent(vis, n_iterations):
     return np.mean(rewards), np.mean(distance_travelled)
 
 
-
+# Calculate the advantages
 def calculate_advantage(rewards, state_values, gamma, terminal_state):
+    # Rewards: A list of rewards
+    # State_values: List of tensors of state_values
+    # gamma: float
+    # terminal_state: List of tensors of 0 or 1 if the corresponding state is a terminal state
+
     # Convert the lists into torch tensors
-    #print(state_values)
     next_values = torch.stack(state_values[1:])
     prev_values = torch.stack(state_values[0:-1])
     terminal_state = torch.stack(terminal_state)
@@ -148,7 +155,13 @@ def calculate_advantage(rewards, state_values, gamma, terminal_state):
 
 
 # Calculate the generalized advantage estimation
-def calculate_gae(lambda_, num_steps, gamma, advantages, terminal_states, state_values):
+def calculate_gae(lambda_, num_steps, gamma, advantages, terminal_states):#, state_values):
+    # lambda: float
+    # num_steps: int, how many steps to calculate gae for
+    # gamma: float
+    # advantages: Tensor of advantages 
+    # terminal_states: List of tensors of if the state is a terminal state
+
     gaes = []
     prev_gae = 0
     
@@ -178,22 +191,23 @@ ppo_epochs       = 10
 discount_factor = 0.99
 lambda_ = 0.95
 
-model = ActorCritic(num_inputs, num_outputs, hidden_size).to(device)
-optimizer = optim.Adam(model.parameters(), lr=lr)
-load_best_model   = False
-
-model = ActorCritic(num_inputs, num_outputs, hidden_size).to(device)
-optimizer = optim.Adam(model.parameters(), lr=lr)
-if load_best_model:
-    model.load_state_dict(torch.load('most_recent_model'))
-
-
 time_steps_to_train_for = 10**6
 evaluate_every = 10**3
 test_rewards = []
 best_model_score = -10**10
 eval_visable = False
 eval_n_iterations = 10
+
+load_best_model   = False
+
+model = ActorCritic(num_inputs, num_outputs, hidden_size).to(device)
+optimizer = optim.Adam(model.parameters(), lr=lr)
+
+
+model = ActorCritic(num_inputs, num_outputs, hidden_size).to(device)
+optimizer = optim.Adam(model.parameters(), lr=lr)
+if load_best_model:
+    model.load_state_dict(torch.load('most_recent_model'))
 
 
 if load_best_model:
@@ -265,7 +279,7 @@ for time_step in range(time_steps_to_train_for//num_envs//num_steps):
     _, next_value = model(next_state)
     state_values = values + [next_value]
     advantages = calculate_advantage(rewards, state_values, discount_factor, terminal_states)
-    gaes = calculate_gae(lambda_, num_steps, discount_factor, advantages, terminal_states, state_values)
+    gaes = calculate_gae(lambda_, num_steps, discount_factor, advantages, terminal_states)#, state_values)
     
     
     log_probs = torch.cat(log_probs).detach()
