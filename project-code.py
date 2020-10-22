@@ -1,7 +1,7 @@
+# This code is based on https://github.com/higgsfield/RL-Adventure-2/blob/master/3.ppo.ipynb
 
 import math
 import random
-import time
 
 import gym
 import pybulletgym
@@ -13,24 +13,39 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.distributions import Normal
 
-
 from IPython.display import clear_output
 import matplotlib.pyplot as plt
 
 
-device   = torch.device("cpu")
+use_cuda = torch.cuda.is_available()
+device   = torch.device("cuda" if use_cuda else "cpu")
 
-#env = gym.make("Walker2DPyBulletEnv-v0")
-#env_name = "InvertedPendulumPyBulletEnv-v0"
-env_name = "Pendulum-v0"
+from multiprocessing_env import SubprocVecEnv
+
+num_envs = 16
+#env_name = "Pendulum-v0"
+env_name = "Walker2DPyBulletEnv-v0"
+# env_name = "InvertedPendulumPyBulletEnv-v0"
+
+def make_env():
+    def _thunk():
+        env = gym.make(env_name)
+        return env
+
+    return _thunk
+
+envs = [make_env() for i in range(num_envs)]
+envs = SubprocVecEnv(envs)
+
 env = gym.make(env_name)
+
 
 
 def init_weights(m):
     if isinstance(m, nn.Linear):
         nn.init.normal_(m.weight, mean=0., std=0.1)
         nn.init.constant_(m.bias, 0.1)
-     
+        
 
 class ActorCritic(nn.Module):
     def __init__(self, num_inputs, num_outputs, hidden_size, std=0.0):
@@ -46,7 +61,7 @@ class ActorCritic(nn.Module):
             nn.Linear(num_inputs, hidden_size),
             nn.ReLU(),
             nn.Linear(hidden_size, num_outputs),
-            #nn.Tanh(),
+            nn.Tanh(),
         )
         self.log_std = nn.Parameter(torch.ones(1, num_outputs) * std)
         
@@ -58,99 +73,113 @@ class ActorCritic(nn.Module):
         std   = self.log_std.exp().expand_as(mu)
         dist  = Normal(mu, std)
         return dist, value
-
     
-# Rename this fuck to evaluate agent
-def test_env(vis):
-    test_env_ = gym.make(env_name)
-    #if vis: test_env_.render()
-    state = test_env_.reset()
-    done = False
-    total_reward = 0
-    while not done:
-        state = torch.FloatTensor(state).unsqueeze(0).to(device)
-        dist, _ = model(state)
-        next_state, reward, done, _ = test_env_.step(dist.sample().cpu().numpy()[0])
-        state = next_state
-        total_reward += reward
-        if vis: time.sleep(1/120)
-        if vis: test_env_.render()
-    
-    #final_location_x = env.robot.get_location()[0]
-    test_env_.close()
-    #return total_reward, final_location_x
-    return total_reward
-
-def compute_gae(next_value, rewards, masks, values, gamma=0.99, tau=0.95):
-    values = values + [next_value]
-    gae = 0
-    returns = []
-    for step in reversed(range(len(rewards))):
-        delta = rewards[step] + gamma * values[step + 1] * masks[step] - values[step]
-        gae = delta + gamma * tau * masks[step] * gae
-        returns.insert(0, gae + values[step])
-    return returns
-
-def calculate_advantage(rewards, state_values, gamma, terminal_state):
-    # Convert the lists into torch tensors
-    prev_values = torch.cat(values[1:])
-    next_values = torch.cat(values[0:-1])
-    terminal_state = torch.cat(terminal_state)
-    rewards = torch.cat(rewards)
-    
-    # Calculate the advantages
-    advantage = rewards + gamma*next_values*terminal_state - prev_values
-    return advantage
-
-"""
-# Calculate the generalized advantage estimation
-def calculate_gae(tau, time_horizon, gamma, advantages):
-    gaes = []
-    prev_gae = []
-
-    # Start with the lastt sample and move backwards 
-    for i in range(time_horizon, 0, -1):
-        advantage = rewards[i] + gamma*state_values[i]*terminal_state[i] - next_state_values[i]
-"""
-
-
 
 def ppo_iter(mini_batch_size, states, actions, log_probs, returns, advantage):
+    
     batch_size = states.size(0)
     for _ in range(batch_size // mini_batch_size):
         rand_ids = np.random.randint(0, batch_size, mini_batch_size)
         yield states[rand_ids, :], actions[rand_ids, :], log_probs[rand_ids, :], returns[rand_ids, :], advantage[rand_ids, :]
         
+        
+
 def ppo_update(ppo_epochs, mini_batch_size, states, actions, log_probs, returns, advantages, clip_param=0.2):
     for _ in range(ppo_epochs):
         for state, action, old_log_probs, return_, advantage in ppo_iter(mini_batch_size, states, actions, log_probs, returns, advantages):
-            dist, value = model(state)
-            entropy = dist.entropy().mean()
-            new_log_probs = dist.log_prob(action)
+            
+            entropy_coefficient = 0.001
+            distance,value = model(state)
+            # Calculating the entropy for the yielded distance
+            entropy = distance.entropy().mean()
+            new_log_probs = distance.log_prob(action)
 
             ratio = (new_log_probs - old_log_probs).exp()
             surr1 = ratio * advantage
-            surr2 = torch.clamp(ratio, 1.0 - clip_param, 1.0 + clip_param) * advantage
-
-            actor_loss  = - torch.min(surr1, surr2).mean()
-            critic_loss = (return_ - value).pow(2).mean()
-
-            loss = 0.5 * critic_loss + actor_loss - 0.001 * entropy
+            clipped_objective  = - torch.min(ratio*advantage, torch.clamp(ratio, 1.0 - clip_param, 1.0 + clip_param) * advantage)
+            critic_loss = (return_ - value).pow(2)
+            critic_mean_loss = critic_loss.mean()
+            actor_mean_loss = clipped_objective.mean()
+            loss = 0.5 * critic_mean_loss + actor_mean_loss - entropy_coefficient * entropy
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
+# This evaluates the agent
+def evaluate_agent(vis, n_iterations):
+    if vis: env.render()
+    rewards = []
+    distance_travelled = []
+
+    for i in range(n_iterations):
+        state = env.reset()
+        in_terminal_state = False
+        iteration_reward = 0
+        while not in_terminal_state:
+            state = torch.FloatTensor(state).reshape(1,-1).to(device)
+            dist, _ = model(state)
+            next_state, reward, in_terminal_state, _ = env.step(dist.sample().cpu().numpy()[0])
+            state = next_state
+            iteration_reward += reward
+            #time.sleep(1/60)
+        
+        distance_travelled.append(env.robot.get_location()[0])
+        rewards.append(iteration_reward)
+
+    
+
+    return np.mean(rewards), np.mean(distance_travelled)
+
+
+
+def calculate_advantage(rewards, state_values, gamma, terminal_state):
+    # Convert the lists into torch tensors
+    #print(state_values)
+    next_values = torch.stack(state_values[1:])
+    prev_values = torch.stack(state_values[0:-1])
+    terminal_state = torch.stack(terminal_state)
+    rewards = torch.stack(rewards)
+    
+    # Calculate the advantages
+    advantage = rewards + gamma*next_values*terminal_state - prev_values
+    return advantage
+
+
+
+# Calculate the generalized advantage estimation
+def calculate_gae(lambda_, num_steps, gamma, advantages, terminal_states, state_values):
+    gaes = []
+    prev_gae = 0
+    
+    # Convert the lists to tensors
+    terminal_states = torch.stack(terminal_states)
+
+    # Start with the last sample and move backwards 
+    for i in range(num_steps-1, -1, -1):
+        gae = advantages[i] + gamma*lambda_*terminal_states[i]*prev_gae
+        #gaes.insert(0, gae)
+        gaes.append(gae)
+        prev_gae = gae
+        
+    # The list in the backwards order. Return it flipped
+    return gaes[::-1]
+
 num_inputs  = env.observation_space.shape[0]
 num_outputs = env.action_space.shape[0]
+
 
 #Hyper params:
 hidden_size      = 256
 lr               = 3e-4
-num_steps        = 20*16
-mini_batch_size  = 20*16
-ppo_epochs       = 4
-threshold_reward = 100000
+num_steps        = 256
+mini_batch_size  = 64
+ppo_epochs       = 10
+discount_factor = 0.99
+lambda_ = 0.95
+
+model = ActorCritic(num_inputs, num_outputs, hidden_size).to(device)
+optimizer = optim.Adam(model.parameters(), lr=lr)
 load_best_model   = False
 
 model = ActorCritic(num_inputs, num_outputs, hidden_size).to(device)
@@ -159,9 +188,12 @@ if load_best_model:
     model.load_state_dict(torch.load('most_recent_model'))
 
 
-max_frames = 1000000
-frame_idx  = 0
+time_steps_to_train_for = 10**6
+evaluate_every = 10**3
+test_rewards = []
 best_model_score = -10**10
+eval_visable = False
+eval_n_iterations = 10
 
 
 if load_best_model:
@@ -174,97 +206,73 @@ else:
     test_distances = []
 
 
-state = env.reset()
-early_stop = False
-done = False
+state = envs.reset()
+time_step_counter = 0
 
-while not early_stop:
+
+
+for time_step in range(time_steps_to_train_for//num_envs//num_steps):
+
+
     log_probs = []
     values    = []
     states    = []
     actions   = []
     rewards   = []
-    masks     = []
+    terminal_states     = []
     entropy = 0
 
-    for _ in range(num_steps):
-        if done:
-            env.reset()
-
-        state = state.reshape(1, -1)
+    for step_counter in range(num_steps):
+        time_step_counter+=1
+        
         state = torch.FloatTensor(state).to(device)
         dist, value = model(state)
 
         action = dist.sample()
-        next_state, reward, done, _ = env.step(action.cpu().numpy())
-        next_state = state.reshape(1, -1)
+        next_state, reward, done, _ = envs.step(action.cpu().numpy())
 
         log_prob = dist.log_prob(action)
         entropy += dist.entropy().mean()
         
         log_probs.append(log_prob)
         values.append(value)
-        # try:
-        #     reward = reward[0]
-        # except e:
-        #     pass
-        #rewards.append(torch.FloatTensor([reward]).unsqueeze(1).to(device))
         rewards.append(torch.FloatTensor(reward).unsqueeze(1).to(device))
-        masks.append(torch.FloatTensor([1 - done]).unsqueeze(1).to(device))
+        terminal_states.append(torch.FloatTensor(1 - done).unsqueeze(1).to(device))
         
         states.append(state)
         actions.append(action)
         
         state = next_state
-        frame_idx += 1
         
-        if frame_idx % 1000 == 0:
-            test_reward = np.mean([test_env(False) for _ in range(10)])
+        if time_step_counter % evaluate_every == 0:
+            test_reward, distance_travelled = evaluate_agent(eval_visable, eval_n_iterations) 
             test_rewards.append(test_reward)
-            if test_reward > threshold_reward: early_stop = True
-            print(test_reward)
+            test_distances.append(distance_travelled)
 
-        # if frame_idx % 1000 == 0:
-        #     tst_rewards = []
-        #     #distance_travelleds = []
-        #     for i in range(10):
-        #         #reward, distance_travelled = test_env(vis=False)
-        #         reward = test_env(False)
-        #         tst_rewards.append(reward)
-        #         #distance_travelleds.append(distance_travelled)
-        #     test_reward = np.mean(tst_rewards)
-        #     #distance_travelled = np.mean(distance_travelleds)
+            print("score:", test_reward, "distance travelled:", distance_travelled)
+            if test_reward > best_model_score: 
+                best_model_score = test_reward
+                torch.save(model.state_dict(), "best_model")
+                with open('test_rewards.npy', 'wb') as f:
+                    np.save(f, test_rewards)
+                with open('distance_travelled.npy', 'wb') as f:
+                    np.save(f, test_distances)
 
-        #     test_rewards.append(test_reward)
-        #     #test_distances.append(distance_travelled)
-
-        #     #print("score:", test_reward, "distance travelled:", distance_travelled)
-        #     print("score:", test_reward)
-        #     if test_reward > best_model_score: 
-        #         best_model_score = test_reward
-        #         torch.save(model.state_dict(), "best_model")
-        #         with open('test_rewards.npy', 'wb') as f:
-        #             np.save(f, test_rewards)
-        #         #with open('distance_travelled.npy', 'wb') as f:
-        #         #    np.save(f, test_distances)
-
-        #     torch.save(model.state_dict(), "most_recent_model")
-
-        #     if test_reward > threshold_reward: early_stop = True
+            torch.save(model.state_dict(), "most_recent_model")
             
 
-    # Calculate the value of the next state
     next_state = torch.FloatTensor(next_state).to(device)
     _, next_value = model(next_state)
-    #advantages = calculate_advantage(rewards, values+[next_value], 0.99, masks)
-    returns = compute_gae(next_value, rewards, masks, values)
-
-    returns   = torch.cat(returns).detach()
-
+    state_values = values + [next_value]
+    advantages = calculate_advantage(rewards, state_values, discount_factor, terminal_states)
+    gaes = calculate_gae(lambda_, num_steps, discount_factor, advantages, terminal_states, state_values)
+    
+    
     log_probs = torch.cat(log_probs).detach()
     values    = torch.cat(values).detach()
     states    = torch.cat(states)
     actions   = torch.cat(actions)
-    advantage = returns - values
+    gaes      = torch.cat(gaes).detach()
+    returns   = (gaes + values).detach()
     
-    ppo_update(ppo_epochs, mini_batch_size, states, actions, log_probs, returns, advantage)
+    ppo_update(ppo_epochs, mini_batch_size, states, actions, log_probs, returns, gaes)
